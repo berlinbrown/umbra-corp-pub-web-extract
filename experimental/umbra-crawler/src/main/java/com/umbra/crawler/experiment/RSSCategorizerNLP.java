@@ -81,11 +81,11 @@ public class RSSCategorizerNLP {
      */
     private static double cosineSimilarity(List<String> tokens1, List<String> tokens2) {
         // Count term frequencies
-        Map<String, Integer> freq1 = termFrequency(tokens1);
-        Map<String, Integer> freq2 = termFrequency(tokens2);
+        final Map<String, Integer> freq1 = termFrequency(tokens1);
+        final Map<String, Integer> freq2 = termFrequency(tokens2);
 
         // Compute dot product and magnitudes
-        Set<String> uniqueTerms = new HashSet<>(freq1.keySet());
+        final Set<String> uniqueTerms = new HashSet<>(freq1.keySet());
         uniqueTerms.addAll(freq2.keySet());
 
         int dotProduct = 0;

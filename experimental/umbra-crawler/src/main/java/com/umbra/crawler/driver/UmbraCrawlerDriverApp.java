@@ -3,6 +3,7 @@ package com.umbra.crawler.driver;
 import com.umbra.crawler.driver.model.WordUnigramFreq;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
@@ -14,10 +15,7 @@ import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.*;
 
 /**
@@ -35,6 +33,10 @@ public class UmbraCrawlerDriverApp {
      */
     private static final long SCALE_UP_FREQ = 100428495;
 
+    // Define timeout values in milliseconds
+    private static final int connectionTimeout = 12000; // Connection establishment timeout
+    private static final int socketTimeout = 12000;     // Data transfer timeout
+
     private static final Map<String, WordUnigramFreq> wordFreqMapData = new TreeMap<>();
 
     /**
@@ -47,9 +49,120 @@ public class UmbraCrawlerDriverApp {
     private static final Map<String, String> wordToPos = new HashMap<>();
 
     /**
-     * All RSS feed titles (or sentence)
+     * All IDF feed titles (or sentence)
      */
     private static final List<String> allDocumentsForIDFCalc = new ArrayList<>();
+
+    private static final Set<String> rssFeedList = new TreeSet<>();
+
+    private static final Set<String> rssFeedCleanList = new TreeSet<>();
+
+    public static void printAllClean() {
+        for (final String rssUrl : rssFeedCleanList) {
+            System.out.println(rssUrl);
+        }
+    }
+    public static void quickAnalysisAllFeeds() {
+        int i = 0;
+        // Run custom algorithm to reject items
+        for (final String rssUrl : rssFeedList) {
+            if (rssUrl.length() > 78) {
+                System.out.println(i + " WARN - rejecting URL because of length - " + rssUrl);
+            } else {
+                System.out.println(i + "@>> ENTERING for RSS " + rssUrl);
+                boolean checkFeed = quickAnalysisFeed(rssUrl);
+                if (checkFeed) {
+                    System.out.println("PASS>" + rssUrl);
+                    rssFeedCleanList.add(rssUrl);
+                } else {
+                    System.out.println("FAIL>" + rssUrl);
+                }
+                System.out.println(i + " @<< LEAVING for RSS " + rssUrl);
+            }
+            i++;
+        }
+    }
+    public static boolean quickAnalysisFeed(final String rssUrl) {
+
+        try (final CloseableHttpClient httpClient = HttpClients.createDefault()) {
+
+            // Step 1: Configure timeouts using RequestConfig
+            final RequestConfig requestConfig = RequestConfig.custom()
+                    .setConnectTimeout(connectionTimeout)
+                    .setSocketTimeout(socketTimeout)
+                    .build();
+
+            // Step 1: Create and execute an HTTP GET request
+            final HttpGet request = new HttpGet(rssUrl);
+
+            // Apply the timeout configuration to the request
+            request.setConfig(requestConfig);
+
+            // Step 2: Set a friendly User-Agent header
+            request.setHeader("User-Agent", "UmbraCrawlerBot/1.0 (Brown +https://github.com/berlinbrown/umbra-corp-pub-web-extract)");
+
+            final HttpResponse response = httpClient.execute(request);
+
+            // Step 2: Check the response status
+            final int statusCode = response.getStatusLine().getStatusCode();
+            if (statusCode != 200) {
+                System.out.println("Failed to fetch RSS feed. HTTP Status: " + statusCode + " rss=" + rssUrl);
+                return false;
+            }
+
+            // Step 3: Parse the response entity
+            final HttpEntity entity = response.getEntity();
+            if (entity == null) {
+                System.out.println("No content found in RSS feed response = " + rssUrl);
+                return false;
+            }
+
+            try (InputStream inputStream = entity.getContent()) {
+                // Step 4: Parse the RSS XML
+                final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                final DocumentBuilder builder = factory.newDocumentBuilder();
+                final Document doc = builder.parse(inputStream);
+
+                // Normalize the XML structure
+                doc.getDocumentElement().normalize();
+
+                // Step 5: Extract RSS feed items
+                final NodeList itemList = doc.getElementsByTagName("item");
+                System.out.println("<Running Report for >> " + itemList.getLength() + "<< number of items");
+                System.out.println("<Processed for >> " + itemList.getLength() + "<< number of items");
+
+                if (itemList.getLength() > 8) {
+                    return true;
+                }
+            } finally {
+                // Ensure the entity content is fully consumed
+                EntityUtils.consume(entity);
+            }
+
+        } catch (final Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    /**
+     * Load feed file with basic listing of feeds
+     */
+    public static void loadRSSFeedFile(final String path) {
+        try (final BufferedReader reader = new BufferedReader(new FileReader(path))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.length() > 2) {
+                    // load documents
+                    System.out.println(" ! Loading RSS Feed, line=" + line.trim());
+                    rssFeedList.add(line.trim());
+                }
+            }
+            System.out.println("*** RSS Feeds Load, rss items loaded=" + rssFeedList.size());
+        } catch (final IOException e) {
+            System.err.println("Error reading RSS data file: " + e.getMessage());
+        }
+    }
 
     public static void loadDocumentsForIDF() {
         final InputStream inputStream = UmbraCrawlerDriverApp.class.getClassLoader()
@@ -240,9 +353,10 @@ public class UmbraCrawlerDriverApp {
     public static void loadRSS() {
         // Continue load RSS feed
         //final String rssUrl = "https://techcrunch.com/feed/";
-        final String rssUrl = "https://feeds.bbci.co.uk/news/world/rss.xml";
+        //final String rssUrl = "https://feeds.bbci.co.uk/news/world/rss.xml";
+        final String rssUrl = "https://gigadom.wordpress.com/feed/";
 
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (final CloseableHttpClient httpClient = HttpClients.createDefault()) {
             // Step 1: Create and execute an HTTP GET request
             final HttpGet request = new HttpGet(rssUrl);
             final HttpResponse response = httpClient.execute(request);
@@ -345,12 +459,14 @@ public class UmbraCrawlerDriverApp {
         loadFile();
         loadWordNet();
         loadDocumentsForIDF();
-        System.out.println(">>>>");
+        System.out.println(">>>> Continue with run, word tools loaded");
 
-        lookupTest();
+        loadRSSFeedFile("./input_feeds/basic-feeds.csv");
+        System.out.println("<<<< Done");
+
+        //quickAnalysisAllFeeds();
+        //printAllClean();
         loadRSS();
-        System.out.println(">>>> Continue with POS testing (done rss)");
-
     }
 
 }
