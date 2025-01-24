@@ -39,6 +39,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.text.DecimalFormat;
+
 
 /**
  * Umbra RSS Crawler, right now all in one class or one file.
@@ -51,7 +53,7 @@ public class UmbraCrawlerDriverApp {
      * Max items, set -1 to load all.
      * Use 20, 30, or -1
      */
-    private static final int MAX_FEED_LOAD_ITEMS = 1000;
+    private static final int MAX_FEED_LOAD_ITEMS = 2000;
     private static final int MAX_LEN_TITLE = 100;
 
     private static final int MAX_LEN_DESCRIPTION = 140;
@@ -60,9 +62,9 @@ public class UmbraCrawlerDriverApp {
 
     private static final int MIN_WORD_CHECK = 4;
 
-    private static final double MIN_VALUE_PERC_CLASSIFY = 50.0;
+    private static final double MIN_VALUE_PERC_CLASSIFY = 45.0;
 
-    private static final double MIN_VALUE_LOOKUP_CLASSIFY = 46.0;
+    private static final double MIN_VALUE_LOOKUP_CLASSIFY = 45.0;
 
     /**
      * Point for high value words
@@ -112,6 +114,7 @@ public class UmbraCrawlerDriverApp {
         for (final String rssUrl : rssFeedCleanList) {
             System.out.println(">> Processing " + rssUrl + " : " + i);
             try {
+                rssOut.println("  {----}");
                 rssOut.println("  { At ROOT RSS Feed, rss.ID=" + i + " : rssURL="+rssUrl);
                 loadRSS(rssOut, rssUrl);
             } catch(final Exception e) {
@@ -138,8 +141,10 @@ public class UmbraCrawlerDriverApp {
                     System.out.println("PASS>" + rssUrl);
                     rssFeedCleanList.add(rssUrl);
                     // TODO remove -- stop at a couple
-                    if (i != -1 && i > MAX_FEED_LOAD_ITEMS) {
-                        break;
+                    if (i != -1) {
+                        if (i > MAX_FEED_LOAD_ITEMS) {
+                            break;
+                        }
                     }
                 } else {
                     System.out.println("FAIL>" + rssUrl);
@@ -334,7 +339,7 @@ public class UmbraCrawlerDriverApp {
             System.out.println("[POS Classify] percent pass=" + perc + ", pass=" + pass + ", i=" + (wordct - 0));
             System.out.println();
             final boolean hasClassifyByPOS = perc > MIN_VALUE_PERC_CLASSIFY;
-            return new Pair<Boolean, String>(hasClassifyByPOS, "(POSCheck:" + perc + ";"+wordct+")");
+            return new Pair<Boolean, String>(hasClassifyByPOS, "(POSCheck:" + formatNumber(perc) + ";"+wordct+")");
         } else {
             System.out.println();
             System.out.println("[POS Classify] could not POS classify");
@@ -380,7 +385,7 @@ public class UmbraCrawlerDriverApp {
             System.out.println();
             System.out.println("[Word Lookup] Percent pass " + perc + " percent (pass=" + pass + ", ct=" + (wordct - 0) + ")");
             final boolean hasLookup = perc > MIN_VALUE_LOOKUP_CLASSIFY;
-            return new Pair<Boolean, String>(hasLookup, "(LookupCheck:"+perc+";"+wordct+")");
+            return new Pair<Boolean, String>(hasLookup, "(LookupCheck:"+formatNumber(perc)+";"+wordct+")");
         } else {
             return new Pair<Boolean, String>(false, "(LookupCheck:0.0)");
         }
@@ -470,8 +475,6 @@ public class UmbraCrawlerDriverApp {
 
     public static void loadRSS(final PrintWriter rssOut, final String singleLoadRssUrl) {
         // Continue load RSS feed
-        //final String rssUrl = "https://techcrunch.com/feed/";
-        //final String rssUrl = "https://feeds.bbci.co.uk/news/world/rss.xml";
         final String rssUrl = singleLoadRssUrl;
         final String headerRssPrefix = "    ";
         final String secondRssPrefix = "        ";
@@ -512,6 +515,7 @@ public class UmbraCrawlerDriverApp {
 
                 // First run through, does it have at least one valid.
                 boolean hasOneValidOne = false;
+                int checkRssItemData = 0;
                 for (int i = 0; i < itemList.getLength(); i++) {
                     final Node item = itemList.item(i);
                     if (item.getNodeType() == Node.ELEMENT_NODE) {
@@ -550,6 +554,7 @@ public class UmbraCrawlerDriverApp {
                         if (pass1Obj.getFirst() && pass2Obj.getFirst() &&
                                 pass3Obj.getFirst() && pass4Obj.getFirst()) {
                             hasOneValidOne = true;
+                            checkRssItemData++;
                         }
                         if (i > MAX_LINKS_RSS) {
                             break;
@@ -558,7 +563,7 @@ public class UmbraCrawlerDriverApp {
                 } // End of first run through.
 
                 // Second run through, write data
-                if (hasOneValidOne) {
+                if (hasOneValidOne && checkRssItemData >= 2) {
                     for (int i = 0; i < itemList.getLength(); i++) {
                         final Node item = itemList.item(i);
                         if (item.getNodeType() == Node.ELEMENT_NODE) {
@@ -573,7 +578,7 @@ public class UmbraCrawlerDriverApp {
                             final String date = getElementValue(element, "pubDate");
 
                             System.out.println("----------------------- (" + i + ") date:" + date);
-                            rssOut.println(secondRssPrefix + "[ Checking RSS Item Entry for data, id=" + i + " ]");
+                            rssOut.println(secondRssPrefix + ".checking RSS Item Entry for data, id=" + i);
 
                             // Clip title and description
                             if (title != null && title.length() > MAX_LEN_TITLE) {
@@ -623,22 +628,25 @@ public class UmbraCrawlerDriverApp {
                                 // final listing for item
                                 rssOut.println();
                             } else {
-                               // rssOut.println(secondRssPrefix + "// skipping printing item, id="
-                               //         + i + " title:" + pass3Obj + " description:" + pass4Obj);
-                               // rssOut.println(secondRssPrefix + "// skipping, id=" + i );
+                                // rssOut.println(secondRssPrefix + "// skipping printing item, id="
+                                //         + i + " title:" + pass3Obj + " description:" + pass4Obj);
+                                // rssOut.println(secondRssPrefix + "// skipping, id=" + i );
                             }
                             if (i > MAX_LINKS_RSS) {
                                 break;
                             }
                         }
                     } // End of second run through.
+                } else {
+                    rssOut.println(secondRssPrefix + "    << No Data Found for RSS URL listed, rssURL="+rssUrl);
+                    rssOut.println();
+                    rssOut.println();
                 } // End of check has at least one valid
                 System.out.println("<Processed for >> " + itemList.getLength() + "<< number of items");
             } finally {
                 // Ensure the entity content is fully consumed
                 EntityUtils.consume(entity);
             }
-
         } catch (final Exception e) {
             e.printStackTrace();
         }
@@ -670,6 +678,11 @@ public class UmbraCrawlerDriverApp {
             throw new IllegalStateException("Invalid Writer Object");
         }
         return out;
+    }
+
+    private static String formatNumber(final double number) {
+        final DecimalFormat df = new DecimalFormat("#.##");
+        return df.format(number);
     }
 
     public static void rssAll() {
@@ -733,7 +746,10 @@ public class UmbraCrawlerDriverApp {
                 try (final PrintWriter rssOut = new PrintWriter(new FileWriter(rssDataFile))) {
                     // Write header for report
                     rssOut.println("#======== Umbra Crawler Bot RSS File Report ========");
+                    rssOut.println("[ Contains RSS Data from sample run including title, description, links and analysis of data ]");
                     rssOut.println("[ RSS File Timestamp = "+ LocalDateTime.now()+ " ]");
+                    rssOut.println();
+                    rssOut.println();
 
                     //loadRSS(rssOut, "https://feeds.bbci.co.uk/news/world/rss.xml");
                     scanAllRSSCleanValues(rssOut);
