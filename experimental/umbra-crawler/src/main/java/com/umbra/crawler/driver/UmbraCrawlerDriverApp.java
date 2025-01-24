@@ -1,6 +1,7 @@
 package com.umbra.crawler.driver;
 
 import com.umbra.crawler.driver.model.WordUnigramFreq;
+import com.umbra.crawler.driver.services.utils.Pair;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.config.RequestConfig;
@@ -15,13 +16,53 @@ import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.time.LocalDateTime;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
- * Umbra RSS Crawler
+ * Umbra RSS Crawler, right now all in one class or one file.
  */
 public class UmbraCrawlerDriverApp {
+
+    private static final long FILE_OFFSET_TIMESTAMP = 173760000000L;
+
+    /**
+     * Max items, set -1 to load all.
+     * Use 20, 30, or -1
+     */
+    private static final int MAX_FEED_LOAD_ITEMS = 1000;
+    private static final int MAX_LEN_TITLE = 100;
+
+    private static final int MAX_LEN_DESCRIPTION = 140;
+
+    private static final int MAX_LINKS_RSS = 8;
+
+    private static final int MIN_WORD_CHECK = 4;
+
+    private static final double MIN_VALUE_PERC_CLASSIFY = 50.0;
+
+    private static final double MIN_VALUE_LOOKUP_CLASSIFY = 46.0;
 
     /**
      * Point for high value words
@@ -57,11 +98,33 @@ public class UmbraCrawlerDriverApp {
 
     private static final Set<String> rssFeedCleanList = new TreeSet<>();
 
-    public static void printAllClean() {
+    private static final Set<String> profanityList = new TreeSet<>();
+
+    public static void printAllClean(final PrintWriter out) {
         for (final String rssUrl : rssFeedCleanList) {
             System.out.println(rssUrl);
         }
+        out(out).println("    [ Clean List RSS Feeds, size = " + rssFeedCleanList.size() + "]");
     }
+
+    public static void scanAllRSSCleanValues(final PrintWriter rssOut) {
+        int i = 0;
+        for (final String rssUrl : rssFeedCleanList) {
+            System.out.println(">> Processing " + rssUrl + " : " + i);
+            try {
+                rssOut.println("  { At ROOT RSS Feed, rss.ID=" + i + " : rssURL="+rssUrl);
+                loadRSS(rssOut, rssUrl);
+            } catch(final Exception e) {
+                e.printStackTrace();
+            }
+            System.out.println("<< Processing " + rssUrl + " : " + i);
+            i++;
+        }
+    }
+
+    /**
+     * Preliminary check, are the feeds available
+     */
     public static void quickAnalysisAllFeeds() {
         int i = 0;
         // Run custom algorithm to reject items
@@ -74,6 +137,10 @@ public class UmbraCrawlerDriverApp {
                 if (checkFeed) {
                     System.out.println("PASS>" + rssUrl);
                     rssFeedCleanList.add(rssUrl);
+                    // TODO remove -- stop at a couple
+                    if (i != -1 && i > MAX_FEED_LOAD_ITEMS) {
+                        break;
+                    }
                 } else {
                     System.out.println("FAIL>" + rssUrl);
                 }
@@ -83,7 +150,6 @@ public class UmbraCrawlerDriverApp {
         }
     }
     public static boolean quickAnalysisFeed(final String rssUrl) {
-
         try (final CloseableHttpClient httpClient = HttpClients.createDefault()) {
 
             // Step 1: Configure timeouts using RequestConfig
@@ -116,7 +182,6 @@ public class UmbraCrawlerDriverApp {
                 System.out.println("No content found in RSS feed response = " + rssUrl);
                 return false;
             }
-
             try (InputStream inputStream = entity.getContent()) {
                 // Step 4: Parse the RSS XML
                 final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -130,7 +195,6 @@ public class UmbraCrawlerDriverApp {
                 final NodeList itemList = doc.getElementsByTagName("item");
                 System.out.println("<Running Report for >> " + itemList.getLength() + "<< number of items");
                 System.out.println("<Processed for >> " + itemList.getLength() + "<< number of items");
-
                 if (itemList.getLength() > 8) {
                     return true;
                 }
@@ -138,7 +202,6 @@ public class UmbraCrawlerDriverApp {
                 // Ensure the entity content is fully consumed
                 EntityUtils.consume(entity);
             }
-
         } catch (final Exception e) {
             e.printStackTrace();
         }
@@ -148,7 +211,7 @@ public class UmbraCrawlerDriverApp {
     /**
      * Load feed file with basic listing of feeds
      */
-    public static void loadRSSFeedFile(final String path) {
+    public static void loadRSSFeedFile(final PrintWriter out, final String path) {
         try (final BufferedReader reader = new BufferedReader(new FileReader(path))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -159,8 +222,32 @@ public class UmbraCrawlerDriverApp {
                 }
             }
             System.out.println("*** RSS Feeds Load, rss items loaded=" + rssFeedList.size());
+            out(out).println("    [ RSS Feed File Original, size rss list = "+ rssFeedList.size()+ " ]");
         } catch (final IOException e) {
             System.err.println("Error reading RSS data file: " + e.getMessage());
+        }
+    }
+
+    public static void loadDocumentForProfanity(final PrintWriter out) {
+        final InputStream inputStream = UmbraCrawlerDriverApp.class.getClassLoader()
+                .getResourceAsStream("com/umbra/crawler/models/profanity.csv");
+        if (inputStream != null) {
+            try (final BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+                String line;
+                int i = 0;
+                while ((line = reader.readLine()) != null) {
+                    if (line.length() > 2) {
+                        profanityList.add(line.trim().toLowerCase());
+                        i++;
+                    }
+                }
+                System.out.println("[Load Profanity Check] - profanity words - " + profanityList.size());
+                out(out).println("    [ Load Profanity Check, records in profanityList = " +profanityList.size()  + " ]");
+            } catch (final IOException e) {
+                System.err.println("Error reading profanity data file: " + e.getMessage());
+            }
+        } else {
+            System.err.println("Error reading profanity dat file: ");
         }
     }
 
@@ -177,7 +264,6 @@ public class UmbraCrawlerDriverApp {
                         allDocumentsForIDFCalc.add(line.trim().toLowerCase());
                     }
                 }
-
             } catch (final IOException e) {
                 System.err.println("Error reading IDF data file: " + e.getMessage());
             }
@@ -185,6 +271,7 @@ public class UmbraCrawlerDriverApp {
             System.err.println("Error reading IDF dat file: ");
         }
     }
+
     // Load WordNet data from a specific file
     public static void loadWordNetData(final String file, final String posTag) {
         final InputStream inputStream = UmbraCrawlerDriverApp.class.getClassLoader()
@@ -216,59 +303,87 @@ public class UmbraCrawlerDriverApp {
         loadWordNetData("data.verb", "verb");
         loadWordNetData("data.adj", "adjective");
         loadWordNetData("data.adv", "adverb");
-
-    }
-
-    public static void posTest() {
-        // Test with a sentence
-        final String sentence = "The happy dog run quickly.";
-        System.out.println("Classifying sentence: " + sentence);
-        classifySentence(sentence);
     }
 
     // Classify words in a sentence
-    public static void classifySentence(String sentence) {
+    public static Pair<Boolean, String> classifySentence(String sentence) {
         final String[] words = sentence.split("\\s+");
+        int i = 0;
+        int wordct = 0;
+        double pass = 0.0;
+        System.out.println();
         for (final String word : words) {
             final String normalizedWord = normalize(word.toLowerCase());
-            String pos = wordToPos.getOrDefault(normalizedWord, "unknown");
-            System.out.println("'" + normalizedWord + "' is a " + pos);
+            if (normalizedWord.length() > 1) {
+                final String pos = wordToPos.getOrDefault(normalizedWord, "unknown");
+                System.out.print(" '" + normalizedWord + "' is a " + pos + ", ");
+                if (!"unknown".equalsIgnoreCase(pos)) {
+                    pass += 1.0;
+                }
+                wordct++;
+            }
+            if (i > 16) {
+                System.out.println();
+                break;
+            }
+            i++;
+        }
+        if (wordct > MIN_WORD_CHECK) {
+            final double perc = (pass / (double) (wordct - 0)) * 100.0;
+            System.out.println();
+            System.out.println("[POS Classify] percent pass=" + perc + ", pass=" + pass + ", i=" + (wordct - 0));
+            System.out.println();
+            final boolean hasClassifyByPOS = perc > MIN_VALUE_PERC_CLASSIFY;
+            return new Pair<Boolean, String>(hasClassifyByPOS, "(POSCheck:" + perc + ";"+wordct+")");
+        } else {
+            System.out.println();
+            System.out.println("[POS Classify] could not POS classify");
+            System.out.println();
+            return new Pair<Boolean, String>(false, "(POSCheck:0.0)");
         }
     }
-
 
     private static String normalize(final String term) {
         if (term == null) {
             return "";
         }
         return term.trim().toLowerCase().replaceAll("[^a-z]", "");
+    }
 
-    }
     /**
      * test word lookup.
      */
-    public static void lookupTest() {
-        final String sentence = "Nine Palestinians killed as Israeli forces launch major operation in Jenin";
-        lookup(sentence);
-    }
-    /**
-     * test word lookup.
-     */
-    public static void lookup(final String sentence) {
+    public static Pair<Boolean, String> lookup(final String sentence) {
         final String [] terms = sentence.split("\\s+");
         double pass = 0;
+        int i = 0;
+        int wordct = 0;
+        System.out.println();
         for (final String term : terms) {
             final String normalizeKey = normalize(term.trim().toLowerCase());
             if (normalizeKey != null && normalizeKey.length() > 2) {
                 final boolean lookupFound = wordFreqMapHighValData.containsKey(normalizeKey);
-                System.out.println("   >" + normalizeKey + " " + lookupFound);
+                // TODO remove System.out.print("   >" + normalizeKey + " " + lookupFound + ", ");
                 if (lookupFound) {
                     pass += 1.0;
                 }
+                wordct++;
             }
+            if (i > 20) {
+                System.out.println();
+                break;
+            }
+            i++;
         }
-        final double perc = (pass / (double)terms.length) * 100.0;
-        System.out.println("Percent pass " + perc + " percent");
+        if (wordct > MIN_WORD_CHECK) {
+            final double perc = (pass / (double) (wordct - 0)) * 100.0;
+            System.out.println();
+            System.out.println("[Word Lookup] Percent pass " + perc + " percent (pass=" + pass + ", ct=" + (wordct - 0) + ")");
+            final boolean hasLookup = perc > MIN_VALUE_LOOKUP_CLASSIFY;
+            return new Pair<Boolean, String>(hasLookup, "(LookupCheck:"+perc+";"+wordct+")");
+        } else {
+            return new Pair<Boolean, String>(false, "(LookupCheck:0.0)");
+        }
     }
 
     /**
@@ -312,9 +427,10 @@ public class UmbraCrawlerDriverApp {
     /**
      * loadfile
      */
-    public static void loadFile() {
+    public static void loadFrequencyFile(final PrintWriter out) {
         // Load without slash format for freq file
-        final InputStream inputStream = UmbraCrawlerDriverApp.class.getClassLoader().getResourceAsStream("com/umbra/crawler/models/unigram_freq.csv");
+        final InputStream inputStream = UmbraCrawlerDriverApp.class.getClassLoader()
+                .getResourceAsStream("com/umbra/crawler/models/unigram_freq.csv");
         if (inputStream != null) {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 String line;
@@ -339,6 +455,8 @@ public class UmbraCrawlerDriverApp {
                 }
                 System.out.println("Word Map Database Size: " + wordFreqMapData.size());
                 System.out.println("Loaded word csv file " + i + " records");
+
+                out(out).println("    [ Freq Files, records in wordFreqMapData = " +wordFreqMapData.size()  + " ]");
             } catch (final IOException e) {
                 e.printStackTrace();
             }
@@ -350,11 +468,13 @@ public class UmbraCrawlerDriverApp {
         }
     }
 
-    public static void loadRSS() {
+    public static void loadRSS(final PrintWriter rssOut, final String singleLoadRssUrl) {
         // Continue load RSS feed
         //final String rssUrl = "https://techcrunch.com/feed/";
         //final String rssUrl = "https://feeds.bbci.co.uk/news/world/rss.xml";
-        final String rssUrl = "https://gigadom.wordpress.com/feed/";
+        final String rssUrl = singleLoadRssUrl;
+        final String headerRssPrefix = "    ";
+        final String secondRssPrefix = "        ";
 
         try (final CloseableHttpClient httpClient = HttpClients.createDefault()) {
             // Step 1: Create and execute an HTTP GET request
@@ -367,6 +487,8 @@ public class UmbraCrawlerDriverApp {
                 System.out.println("Failed to fetch RSS feed. HTTP Status: " + statusCode);
                 return;
             }
+            rssOut.println();
+            rssOut.println(headerRssPrefix + "[ Successful (200 HTTP Response) Download for RSS FEED URL = " + singleLoadRssUrl);
 
             // Step 3: Parse the response entity
             final HttpEntity entity = response.getEntity();
@@ -388,34 +510,129 @@ public class UmbraCrawlerDriverApp {
                 final NodeList itemList = doc.getElementsByTagName("item");
                 System.out.println("<Running Report for >> " + itemList.getLength() + "<< number of items");
 
+                // First run through, does it have at least one valid.
+                boolean hasOneValidOne = false;
                 for (int i = 0; i < itemList.getLength(); i++) {
-                    Node item = itemList.item(i);
+                    final Node item = itemList.item(i);
                     if (item.getNodeType() == Node.ELEMENT_NODE) {
-                        Element element = (Element) item;
-
-                        // Extract title, description, and link
-                        final String title = getElementValue(element, "title");
-                        final String description = getElementValue(element, "description");
+                        final Element element = (Element) item;
+                        String title = getElementValue(element, "title");
+                        String description = getElementValue(element, "description");
+                        final String origTitle = title;
+                        final String origDescription = description;
                         final String link = getElementValue(element, "link");
                         final String date = getElementValue(element, "pubDate");
-
                         System.out.println("----------------------- (" + i + ") date:" + date);
-                        System.out.println("Title: " + title);
-                        System.out.println("Description: " + description);
-                        System.out.println("Link: " + link);
+                        // Clip title and description
+                        if (title != null && title.length() > MAX_LEN_TITLE) {
+                            title = title.substring(0, MAX_LEN_TITLE) + "...";
+                        }
+                        if (description != null && description.length() > MAX_LEN_DESCRIPTION) {
+                            description = description.substring(0, MAX_LEN_DESCRIPTION)  + "...";
+                        }
+                        System.out.println("(first run) Title: " + title);
+                        System.out.println("(first run) Description: " + description);
+                        System.out.println("(first run) Link: " + link);
 
-                        lookup(title);
-                        lookup(description);
-                        classifySentence(title);
-                        classifySentence(description);
+                        // First run
+                        Pair<Boolean, String> pass1Obj;
+                        Pair<Boolean, String> pass2Obj;
+                        Pair<Boolean, String> pass3Obj;
+                        Pair<Boolean, String> pass4Obj;
 
-                        // Test title for IDF
+                        System.out.println("[[ Lookup Title ==]]");
+                        pass1Obj = lookup(origTitle);
+                        System.out.println("[[ Lookup Description ==]]");
+                        pass2Obj = lookup(origDescription);
+                        pass3Obj = classifySentence(origTitle);
+                        pass4Obj = classifySentence(origDescription);
                         double relevanceScore = calculateTFIDFRelevance(description);
-                        System.out.println("     >)Relevance Score: " + relevanceScore);
-
-                        System.out.println("-----------------------");
+                        if (pass1Obj.getFirst() && pass2Obj.getFirst() &&
+                                pass3Obj.getFirst() && pass4Obj.getFirst()) {
+                            hasOneValidOne = true;
+                        }
+                        if (i > MAX_LINKS_RSS) {
+                            break;
+                        }
                     }
-                }
+                } // End of first run through.
+
+                // Second run through, write data
+                if (hasOneValidOne) {
+                    for (int i = 0; i < itemList.getLength(); i++) {
+                        final Node item = itemList.item(i);
+                        if (item.getNodeType() == Node.ELEMENT_NODE) {
+                            Element element = (Element) item;
+
+                            // Extract title, description, and link
+                            String title = getElementValue(element, "title");
+                            String description = getElementValue(element, "description");
+                            final String origTitle = title;
+                            final String origDescription = description;
+                            final String link = getElementValue(element, "link");
+                            final String date = getElementValue(element, "pubDate");
+
+                            System.out.println("----------------------- (" + i + ") date:" + date);
+                            rssOut.println(secondRssPrefix + "[ Checking RSS Item Entry for data, id=" + i + " ]");
+
+                            // Clip title and description
+                            if (title != null && title.length() > MAX_LEN_TITLE) {
+                                title = title.substring(0, MAX_LEN_TITLE) + "...";
+                            }
+                            if (description != null && description.length() > MAX_LEN_DESCRIPTION) {
+                                description = description.substring(0, MAX_LEN_DESCRIPTION) + "...";
+                            }
+                            System.out.println("(second run) Title: " + title);
+                            System.out.println("(second run) Description: " + description);
+                            System.out.println("(second run) Link: " + link);
+
+                            // Second run
+                            Pair<Boolean, String> pass1Obj;
+                            Pair<Boolean, String> pass2Obj;
+                            Pair<Boolean, String> pass3Obj;
+                            Pair<Boolean, String> pass4Obj;
+
+                            System.out.println("[[ Lookup Title ==]]");
+                            pass1Obj = lookup(origTitle);
+                            System.out.println("[[ Lookup Description ==]]");
+                            pass2Obj = lookup(origDescription);
+
+                            System.out.println("[[ POS Classify Title ==]]");
+                            pass3Obj = classifySentence(origTitle);
+                            System.out.println("[[ POS Classify Description ==]]");
+                            pass4Obj = classifySentence(origDescription);
+
+                            // Test title for IDF
+                            double relevanceScore = calculateTFIDFRelevance(description);
+                            System.out.println("     >)Relevance Score: " + relevanceScore);
+                            System.out.println("-----------------------");
+
+                            if (pass1Obj.getFirst() && pass2Obj.getFirst() &&
+                                    pass3Obj.getFirst() && pass4Obj.getFirst()) {
+                                rssOut.println(secondRssPrefix + "--------");
+                                rssOut.println(secondRssPrefix + "Item contains passed data, printing, id=" + i);
+                                rssOut.println(secondRssPrefix + " Title=" + title);
+                                rssOut.println(secondRssPrefix + " Description=" + description);
+                                rssOut.println(secondRssPrefix + " Publication Date=" + date);
+                                rssOut.println(secondRssPrefix + " Link=" + link);
+                                rssOut.println(secondRssPrefix + " (----)");
+                                rssOut.println(secondRssPrefix + " *Lookup Checks title:" + pass1Obj + " - description:" + pass2Obj);
+                                rssOut.println(secondRssPrefix + " *POS Checks title:" + pass3Obj + " - description:" + pass4Obj);
+                                rssOut.println(secondRssPrefix + " *IDF Relevance Score=" + relevanceScore);
+                                rssOut.println(secondRssPrefix + " (----)");
+                                // final listing for item
+                                rssOut.println();
+                            } else {
+                               // rssOut.println(secondRssPrefix + "// skipping printing item, id="
+                               //         + i + " title:" + pass3Obj + " description:" + pass4Obj);
+                               // rssOut.println(secondRssPrefix + "// skipping, id=" + i );
+                            }
+                            if (i > MAX_LINKS_RSS) {
+                                break;
+                            }
+                        }
+                    } // End of second run through.
+                } // End of check has at least one valid
                 System.out.println("<Processed for >> " + itemList.getLength() + "<< number of items");
             } finally {
                 // Ensure the entity content is fully consumed
@@ -448,25 +665,105 @@ public class UmbraCrawlerDriverApp {
         }
     }
 
+    private static PrintWriter out(final PrintWriter out) {
+        if (out == null) {
+            throw new IllegalStateException("Invalid Writer Object");
+        }
+        return out;
+    }
+
+    public static void rssAll() {
+
+        final String formattedDate = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMdd")).toLowerCase();
+        final long timestampDir = System.currentTimeMillis() - FILE_OFFSET_TIMESTAMP;
+        final String filePath = "./output/samplerun/analytics/" + formattedDate + "/00" + timestampDir
+                + "/data/job_analytics.dat";
+        final Path path = Paths.get(filePath).getParent();
+
+        // Continue with rss data file
+        final String rssDataFile = "./output/samplerun/data/" + formattedDate + "/00" + timestampDir
+                + "/data/rss_feed.dat";
+        final Path rssDataPath = Paths.get(rssDataFile).getParent();
+
+        try {
+            if (!Files.exists(path)) {
+                Files.createDirectories(path);
+            }
+            if (!Files.exists(rssDataPath)) {
+                Files.createDirectories(rssDataPath);
+            }
+            // Open the file and get access to PrintWriter
+            try (final PrintWriter out = new PrintWriter(new FileWriter(filePath))) {
+
+                // Write header for report
+                out.println("#======== Umbra Crawler Bot Job System Report ========");
+                out.println("[ Job Timestamp = "+ LocalDateTime.now()+ " ]");
+                System.out.println("File written successfully to: " + filePath);
+
+                System.out.println("(([Step 1] Entering loading frequency file ))");
+                out(out).println(" [ Frequency File Data ]");
+                loadFrequencyFile(out);
+
+                System.out.println("(([Step 2] Entering loading word net file ))");
+                loadWordNet();
+
+                System.out.println("(([Step 3] Entering loading documents for IDF ))");
+                loadDocumentsForIDF();
+
+                System.out.println("(([Step 4] Entering loading documents for profanity ))");
+                out(out).println(" [ Profanity Data ]");
+                loadDocumentForProfanity(out);
+                System.out.println(">>>> Continue with run, word tools loaded");
+
+                System.out.println("(([Step 5] Entering loading documents RSS feed file off file system ))");
+                out(out).println(" [ Basic RSS Feeds Listing ]");
+                loadRSSFeedFile(out, "./input_feeds/basic-feeds.csv");
+                System.out.println("<<<< Done");
+
+                System.out.println("(([Step 6] System Check for RSS Data ))");
+                quickAnalysisAllFeeds();
+
+                System.out.println("(([Step 7] List of cleaned RSS feeds ))");
+                out(out).println(" [ Verifying RSS Listing ]");
+                printAllClean(out);
+
+                //loadRSS("https://feeds.bbci.co.uk/news/world/rss.xml");
+
+                // Continue to write rss data file
+                try (final PrintWriter rssOut = new PrintWriter(new FileWriter(rssDataFile))) {
+                    // Write header for report
+                    rssOut.println("#======== Umbra Crawler Bot RSS File Report ========");
+                    rssOut.println("[ RSS File Timestamp = "+ LocalDateTime.now()+ " ]");
+
+                    //loadRSS(rssOut, "https://feeds.bbci.co.uk/news/world/rss.xml");
+                    scanAllRSSCleanValues(rssOut);
+
+                    rssOut.println();
+                    rssOut.println("#======== End File ========");
+
+                }
+                out(out).println();
+                out(out).println(" [ Job Complete "+ LocalDateTime.now() + " ]");
+                out.println("#======== End of Job System Report ========");
+            }
+
+        } catch (final IOException e) {
+            // Handle exceptions properly
+            System.err.println("An error occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Main entry point into program.
      * @param args
      */
     public static void main( String[] args ) {
 
-        System.out.println("Running Crawler");
+        System.out.println("==== Running Crawler Bot ====");
+        rssAll();
+        System.out.println("==== End Running Crawler Bot ====");
 
-        loadFile();
-        loadWordNet();
-        loadDocumentsForIDF();
-        System.out.println(">>>> Continue with run, word tools loaded");
-
-        loadRSSFeedFile("./input_feeds/basic-feeds.csv");
-        System.out.println("<<<< Done");
-
-        //quickAnalysisAllFeeds();
-        //printAllClean();
-        loadRSS();
     }
 
 }
