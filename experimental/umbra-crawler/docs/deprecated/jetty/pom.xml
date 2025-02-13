@@ -1,57 +1,37 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-
-  <!-- 3.4.2 jan 2025 -->
-  <parent>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.4.2</version>
-    <relativePath/> <!-- lookup parent from repository -->
-  </parent>
-
   <groupId>com.umbra</groupId>
   <artifactId>umbracrawler</artifactId>
-  <packaging>jar</packaging>
+  <packaging>war</packaging>
   <version>1.0-SNAPSHOT</version>
   <name>umbracrawler</name>
   <url>http://maven.apache.org</url>
-
-  <properties>
-    <java.version>21</java.version>
-  </properties>
-
   <dependencies>
 
+    <!-- jetty and web framework -->
+    <!-- Jetty Embedded Server -->
     <dependency>
-      <groupId>org.hsqldb</groupId>
-      <artifactId>hsqldb</artifactId>
-      <version>2.7.2</version>
-      <scope>runtime</scope>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-server</artifactId>
+      <version>12.0.16</version>
     </dependency>
 
+    <!-- JSP and JSTL support -->
+    <!-- Not needed with new jetty
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-web</artifactId>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>apache-jsp</artifactId>
+      <version>9.4.31.v20200723</version>
     </dependency>
+    -->
 
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-test</artifactId>
-      <scope>test</scope>
-    </dependency>
-
-    <!-- Tomcat JSP dependencies -->
-    <dependency>
-      <groupId>org.apache.tomcat.embed</groupId>
-      <artifactId>tomcat-embed-jasper</artifactId>
-    </dependency>
-
-    <!-- JSTL for JSP -->
+    <!-- Servlet API -->
     <dependency>
       <groupId>javax.servlet</groupId>
-      <artifactId>jstl</artifactId>
-      <version>1.2</version>
+      <artifactId>javax.servlet-api</artifactId>
+      <version>4.0.1</version>
+      <scope>provided</scope>
     </dependency>
 
     <!-- Apache HttpClient (2022) -->
@@ -91,18 +71,25 @@
 
   <build>
     <plugins>
-
-      <plugin>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-      </plugin>
-
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <version>3.3.0</version>
         <configuration>
           <mainClass>com.umbra.crawler.driver.UmbraCrawlerDriverApp</mainClass>
+        </configuration>
+      </plugin>
+
+      <!-- Jetty Maven Plugin for running embedded Jetty server -->
+      <plugin>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-maven-plugin</artifactId>
+        <version>9.4.43.v20210629</version>
+        <configuration>
+          <webAppConfig>
+            <contextPath>/</contextPath>
+            <war>${project.build.directory}/${project.build.finalName}.war</war>
+          </webAppConfig>
         </configuration>
       </plugin>
     </plugins>

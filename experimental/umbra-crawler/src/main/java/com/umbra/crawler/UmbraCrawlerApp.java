@@ -21,6 +21,10 @@ public class UmbraCrawlerApp  {
 
     public static void main( String[] args ) {
 
+        if (true) {
+            throw new RuntimeException();
+        }
+
         System.out.println("Running Crawler");
         //final String rssUrl = "https://techcrunch.com/feed/";
         final String rssUrl = "https://feeds.bbci.co.uk/news/world/rss.xml";

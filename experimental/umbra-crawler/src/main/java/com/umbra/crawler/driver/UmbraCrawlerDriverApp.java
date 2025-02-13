@@ -775,7 +775,9 @@ public class UmbraCrawlerDriverApp {
      * @param args
      */
     public static void main( String[] args ) {
-
+        if (true) {
+            throw new RuntimeException();
+        }
         System.out.println("==== Running Crawler Bot ====");
         rssAll();
         System.out.println("==== End Running Crawler Bot ====");

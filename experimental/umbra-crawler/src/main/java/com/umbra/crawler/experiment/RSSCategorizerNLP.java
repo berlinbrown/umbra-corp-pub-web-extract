@@ -9,6 +9,10 @@ import java.util.stream.Collectors;
 public class RSSCategorizerNLP {
 
     public static void main(String[] args) {
+
+        if (true) {
+            throw new RuntimeException();
+        }
         // Example RSS feed phrases
         final List<String> phrases = Arrays.asList(
             "Rocket launch challenges Elon Musk's space dominance",

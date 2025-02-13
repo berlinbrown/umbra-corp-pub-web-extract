@@ -14,6 +14,10 @@ public class UmbraCrawlerAppAtom {
 
     public static void main(String[] args) {
 
+        if (true) {
+            throw new RuntimeException();
+        }
+
         final String feedUrl = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.atom";
         try {
             // Connect to the remote URL
